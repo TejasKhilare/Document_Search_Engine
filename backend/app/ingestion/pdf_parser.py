@@ -1,26 +1,41 @@
 import pdfplumber
-from typing import List,Dict
-from app.ingestion.ocr import extract_text_from_scanned_pdf
+from typing import List, Dict
+from app.ingestion.ocr import extract_scanned_pdf_words
 
 
-def extract_pdf_pages(pdf_path:str)->List[Dict]:
-    pages=[]
+def extract_pdf_words(pdf_path: str) -> List[List[Dict]]:
+    pages = []
     has_text = False
-    with pdfplumber.open(pdf_path) as pdf:
-        for i,page in enumerate(pdf.pages):
-            text = page.extract_text()
-            if text and text.strip():
-                has_text = True
-            pages.append({
-                "page_no": i + 1,
-                "text": text or ""
-            })
 
+    with pdfplumber.open(pdf_path) as pdf:
+        for page_index, page in enumerate(pdf.pages):
+            words = page.extract_words(use_text_flow=True)
+            page_words = []
+
+            if words:
+                has_text = True
+
+            page_width = page.width
+            page_height = page.height
+
+            for w in words:
+                text = w["text"].strip()
+                if not text:
+                    continue
+
+                page_words.append({
+                    "text": text,
+                    "page_no": page_index + 1,
+                    "x": w["x0"] / page_width,
+                    "y": w["top"] / page_height,
+                    "width": (w["x1"] - w["x0"]) / page_width,
+                    "height": (w["bottom"] - w["top"]) / page_height,
+                })
+
+            pages.append(page_words)
+
+    # OCR fallback for scanned PDFs
     if not has_text:
-        ocr_texts = extract_text_from_scanned_pdf(pdf_path)
-        pages = [
-            {"page_no": i + 1, "text": ocr_texts[i]}
-            for i in range(len(ocr_texts))
-        ]   
+        pages = extract_scanned_pdf_words(pdf_path)
+
     return pages
-    

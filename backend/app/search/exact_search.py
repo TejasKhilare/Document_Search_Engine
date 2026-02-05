@@ -1,15 +1,44 @@
-from collections import defaultdict
-from app.search.ranking import score_page
+def exact_search(query_tokens, index):
+    """
+    Returns:
+    doc_id -> page_no -> {
+        score: float,
+        highlights: [ { word, x, y, width, height } ]
+    }
+    """
 
-def exact_search(query_tokens,index):
-    results=defaultdict(lambda:defaultdict(float))
+    results = {}
 
     for token in query_tokens:
-        postings=index.index.get(token,{})
-        idf=index.get_idf(token)
+        token = token.strip()
+        if token not in index.index:
+            continue
 
-        for doc_id,pages in postings.items():
-            for page_no,positions in pages.items():
-                tf=len(positions)
-                results[doc_id][page_no] += score_page(tf, idf)
+        idf = index.get_idf(token)
+
+        for doc_id, pages in index.index[token].items():
+            for page_no, boxes in pages.items():
+                tf = len(boxes)
+                score = tf * idf
+
+                if doc_id not in results:
+                    results[doc_id] = {}
+
+                if page_no not in results[doc_id]:
+                    results[doc_id][page_no] = {
+                        "score": 0.0,
+                        "highlights": []
+                    }
+
+                results[doc_id][page_no]["score"] += score
+
+                for box in boxes:
+                    results[doc_id][page_no]["highlights"].append({
+                        "word": token,
+                        "x": box["x"],
+                        "y": box["y"],
+                        "width": box["width"],
+                        "height": box["height"]
+                    })
+
     return results
