@@ -9,6 +9,8 @@ from app.indexing.index_builder import IndexBuilder
 from app.search.exact_search import exact_search
 from app.ingestion.ocr import extract_image_words
 
+from fastapi.middleware.cors import CORSMiddleware
+
 # -------------------------
 # Paths
 # -------------------------
@@ -27,7 +29,7 @@ builder = IndexBuilder(index)
 # -------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("🔄 Lifespan startup: indexing stored files")
+    print("Lifespan startup: indexing stored files")
 
     for filename in os.listdir(UPLOAD_DIR):
         file_path = os.path.join(UPLOAD_DIR, filename)
@@ -68,6 +70,16 @@ async def lifespan(app: FastAPI):
 # App
 # -------------------------
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # -------------------------
 # Health
@@ -146,6 +158,59 @@ async def upload_files(files: List[UploadFile] = File(...)):
         "indexed_documents": indexed_docs
     }
 
+
+@app.get("/documents")
+def list_documents():
+    docs = []
+    for filename in os.listdir(UPLOAD_DIR):
+        docs.append({
+            "doc_id": filename,
+            "file_type": "pdf" if filename.endswith(".pdf") else "image"
+        })
+    return docs
+
+
+@app.delete("/documents/{doc_id}")
+def delete_document(doc_id: str):
+    path = os.path.join(UPLOAD_DIR, doc_id)
+
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Delete file
+    os.remove(path)
+
+    # Rebuild index safely
+    global index, builder
+    index = InvertedIndex()
+    builder = IndexBuilder(index)
+
+    for filename in os.listdir(UPLOAD_DIR):
+        file_path = os.path.join(UPLOAD_DIR, filename)
+
+        if filename.endswith(".pdf"):
+            builder.index_pdf(file_path, filename)
+        elif filename.endswith((".png", ".jpg", ".jpeg")):
+            words = extract_image_words(file_path)
+            index.increment_doc_count()
+            for w in words:
+                token = normalize_token(w["text"])
+                if not token:
+                    continue
+                index.add_token(
+                    token=token,
+                    doc_id=filename,
+                    page_no=1,
+                    box={
+                        "x": w["x"],
+                        "y": w["y"],
+                        "width": w["width"],
+                        "height": w["height"],
+                    }
+                )
+
+    return {"deleted": doc_id}
+
 # -------------------------
 # Search (still score-only)
 # -------------------------
@@ -174,6 +239,6 @@ def search(q: str):
             })
 
     ranked.sort(key=lambda x: x["score"], reverse=True)
-    print("QUERY TOKENS:", query_tokens)
-    print("INDEX TOKENS SAMPLE:", list(index.index.keys())[:150])
+    # print("QUERY TOKENS:", query_tokens)
+    # print("INDEX TOKENS SAMPLE:", list(index.index.keys())[:150])
     return ranked

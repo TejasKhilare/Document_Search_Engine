@@ -37,7 +37,7 @@ def extract_image_words(image_path: str) -> List[Dict]:
 
 
 def extract_scanned_pdf_words(pdf_path: str) -> List[List[Dict]]:
-    images = convert_from_path(pdf_path)
+    images = convert_from_path(pdf_path,dpi=300)
     pages = []
 
     for page_index, img in enumerate(images):
